@@ -167,6 +167,11 @@ body{
 .btn-tsumo{background:#27ae60;color:#fff;}
 .btn-ron{background:#2980b9;color:#fff;}
 .btn-pass{background:#555;color:#ddd;}
+.btn-pon{background:#9b59b6;color:#fff;}
+.btn-chi{background:#e67e22;color:#fff;}
+/* Melds */
+.melds-row{display:flex;gap:4px;flex-wrap:wrap;min-height:0;}
+.meld-group{display:flex;gap:1px;background:rgba(0,0,0,.25);border-radius:4px;padding:2px;border:1px solid rgba(255,255,255,.1);}
 
 /* Status */
 #statusMsg{
@@ -289,6 +294,8 @@ body{
     <button class="act-btn btn-riichi" id="btnRiichi" style="display:none" onclick="doRiichi()">リーチ</button>
     <button class="act-btn btn-tsumo" id="btnTsumo" style="display:none" onclick="doTsumo()">ツモ</button>
     <button class="act-btn btn-ron" id="btnRon" style="display:none" onclick="doRon()">ロン</button>
+    <button class="act-btn btn-pon" id="btnPon" style="display:none" onclick="doPon()">ポン</button>
+    <button class="act-btn btn-chi" id="btnChi" style="display:none" onclick="offerChii()">チー</button>
     <button class="act-btn btn-pass" id="btnPass" style="display:none" onclick="doPass()">パス</button>
   </div>
 
@@ -301,6 +308,7 @@ body{
       <span class="player-score" id="score0">25000</span>
     </div>
     <div class="player-hand-row" id="hand0"></div>
+    <div class="melds-row" id="melds0"></div>
     <div class="discards-wrap">
       <div class="disc-label">あなたの捨て牌</div>
       <div class="discards" id="disc0"></div>
@@ -539,6 +547,8 @@ function initGame(state){
       currentPlayer:0, // who is playing now
       drawnTile:null,
       pendingRon:null, // {tile, from}
+      pendingMeld:null,
+      melds:[[],[],[],[]],
       turn:0
     };
     dealerFirstDraw();
@@ -577,7 +587,13 @@ function dealerFirstDraw(){
 // ===== GAME FLOW =====
 function nextTurn(){
   if(cpuTimer) clearTimeout(cpuTimer);
-  const next=(G.currentPlayer+1)%4;
+  let next;
+  if(G.nextAfterMeld!==undefined){
+    next=G.nextAfterMeld;
+    delete G.nextAfterMeld;
+  } else {
+    next=(G.currentPlayer+1)%4;
+  }
   G.currentPlayer=next;
   G.drawnTile=null;
 
@@ -630,7 +646,8 @@ function doCpuTurn(cpuIdx){
   }
 
   // Check player ron (and other CPUs ron - for simplicity skip CPU-CPU ron)
-  const playerWaiting=getTenpai(G.hands[0]);
+  const meldCount0=G.melds[0].length;
+  const playerWaiting=meldCount0>0?getTenpaiOpen(G.hands[0],meldCount0):getTenpai(G.hands[0]);
   const canRon=playerWaiting.includes(discTile.id)
     &&!isFuriten(G.hands[0],G.discards[0])
     &&hasRonYaku(0);
@@ -642,7 +659,16 @@ function doCpuTurn(cpuIdx){
     G.pendingRon={tile:discTile,from:cpuIdx};
     render();
   } else {
-    cpuTimer=setTimeout(()=>nextTurn(),300);
+    // Check pon/chii offer to player
+    const pon=canPlayerPon(discTile.id);
+    const chiiOpts=cpuIdx===3?getChiiOptions(discTile.id):[];
+    if(pon||chiiOpts.length>0){
+      G.phase='meld_offer';
+      G.pendingMeld={tile:discTile,from:cpuIdx,ponOk:pon,chiiOptions:chiiOpts};
+      render();
+    } else {
+      cpuTimer=setTimeout(()=>nextTurn(),300);
+    }
   }
 }
 
@@ -716,7 +742,9 @@ function checkPlayerTsumo(){
 function doTsumo(){
   if(G.phase!=='player_discard'||!G.drawnTile) return;
   const full=[...G.hands[0],G.drawnTile];
-  if(!isWin(full)){ showStatus('和了できません'); return; }
+  const mc=G.melds[0].length;
+  const win=mc>0?isWinOpen(full,mc):isWin(full);
+  if(!win){ showStatus('和了できません'); return; }
   G.hands[0]=full;
   G.drawnTile=null;
   const pts=calcScore(0,-1,'tsumo');
@@ -749,17 +777,140 @@ function doRon(){
 }
 
 function doPass(){
-  if(G.phase!=='ron_offer') return;
-  // Furiten: add pending tile to discards? No - furiten only applies if we had the chance to win
-  // Mark furiten by adding to own discards for furiten detection
-  if(G.pendingRon){
-    // Temporary furiten: will clear after player draws next
-    G._furitenTile=G.pendingRon.tile.id;
+  if(G.phase==='ron_offer'){
+    if(G.pendingRon){
+      G._furitenTile=G.pendingRon.tile.id;
+    }
+    G.pendingRon=null;
+    G.phase='cpu_turn';
+    render();
+    cpuTimer=setTimeout(()=>nextTurn(),300);
+  } else if(G.phase==='meld_offer'){
+    G.pendingMeld=null;
+    G.phase='cpu_turn';
+    render();
+    cpuTimer=setTimeout(()=>nextTurn(),300);
   }
-  G.pendingRon=null;
-  G.phase='cpu_turn';
+}
+
+// ===== PON / CHII =====
+function canPlayerPon(tileId){
+  if(G.riichi[0]) return false;
+  return G.hands[0].filter(t=>t.id===tileId).length>=2;
+}
+
+function getChiiOptions(tileId){
+  if(G.riichi[0]) return [];
+  if(tileId>=27) return []; // 字牌はチー不可
+  const suit=Math.floor(tileId/9);
+  const handIds=G.hands[0].map(t=>t.id);
+  const options=[];
+  const seqs=[[tileId-2,tileId-1],[tileId-1,tileId+1],[tileId+1,tileId+2]];
+  for(const [a,b] of seqs){
+    if(a<0||b<0||a>26||b>26) continue;
+    if(Math.floor(a/9)!==suit||Math.floor(b/9)!==suit) continue;
+    const tmp=[...handIds];
+    const ia=tmp.indexOf(a); if(ia===-1) continue;
+    tmp.splice(ia,1);
+    const ib=tmp.indexOf(b); if(ib===-1) continue;
+    options.push([a,b]);
+  }
+  return options;
+}
+
+function doPon(){
+  if(G.phase!=='meld_offer'||!G.pendingMeld||!G.pendingMeld.ponOk) return;
+  const {tile,from}=G.pendingMeld;
+  let removed=0;
+  const newHand=[];
+  for(const t of G.hands[0]){
+    if(t.id===tile.id&&removed<2){removed++;} else {newHand.push(t);}
+  }
+  G.hands[0]=newHand;
+  G.melds[0].push({type:'pon',tileId:tile.id});
+  const fromNext=(from+1)%4;
+  G.nextAfterMeld=fromNext===0?1:fromNext;
+  G.pendingMeld=null;
+  G.currentPlayer=0;
+  G.phase='player_discard';
+  G.drawnTile=null;
+  selectedIdx=-1;
   render();
-  cpuTimer=setTimeout(()=>nextTurn(),300);
+  showStatus('ポン！ 捨て牌を選んでください');
+}
+
+function offerChii(){
+  if(G.phase!=='meld_offer'||!G.pendingMeld) return;
+  const opts=G.pendingMeld.chiiOptions;
+  if(!opts||opts.length===0) return;
+  if(opts.length===1){ doChii(opts[0][0],opts[0][1]); return; }
+  const btns=opts.map(([a,b])=>({label:`${TNAME[a]}+${TNAME[b]}`,fn:`doChii(${a},${b})`}));
+  btns.push({label:'キャンセル',fn:'hideOverlay()'});
+  showOverlay('チー','どの組み合わせでチーしますか？',btns);
+}
+
+function doChii(tileAId,tileBId){
+  hideOverlay();
+  if(!G.pendingMeld) return;
+  const {tile,from}=G.pendingMeld;
+  let removedA=false,removedB=false;
+  const newHand=[];
+  for(const t of G.hands[0]){
+    if(t.id===tileAId&&!removedA){removedA=true;continue;}
+    if(t.id===tileBId&&!removedB){removedB=true;continue;}
+    newHand.push(t);
+  }
+  G.hands[0]=newHand;
+  G.melds[0].push({type:'chii',tileIds:[tileAId,tile.id,tileBId].sort((a,b)=>a-b)});
+  const fromNext=(from+1)%4;
+  G.nextAfterMeld=fromNext===0?1:fromNext;
+  G.pendingMeld=null;
+  G.currentPlayer=0;
+  G.phase='player_discard';
+  G.drawnTile=null;
+  selectedIdx=-1;
+  render();
+  showStatus('チー！ 捨て牌を選んでください');
+}
+
+// ===== OPEN HAND WIN HELPERS =====
+function stdWinN(cnt,setsNeeded){
+  for(let i=0;i<34;i++){
+    if(cnt[i]>=2){
+      cnt[i]-=2;
+      if(canSetsN([...cnt],setsNeeded)){cnt[i]+=2;return true;}
+      cnt[i]+=2;
+    }
+  }
+  return false;
+}
+function canSetsN(c,n){
+  if(n===0) return c.every(v=>v===0);
+  const i=c.findIndex(v=>v>0);
+  if(i<0) return false;
+  if(c[i]>=3){c[i]-=3;if(canSetsN(c,n-1)) return true;c[i]+=3;}
+  if(i<27&&i%9<=6&&c[i+1]>0&&c[i+2]>0){
+    c[i]--;c[i+1]--;c[i+2]--;
+    if(canSetsN(c,n-1)) return true;
+    c[i]++;c[i+1]++;c[i+2]++;
+  }
+  return false;
+}
+function isWinOpen(handWithDraw,meldsCount){
+  const needed=4-meldsCount;
+  const cnt=Array(34).fill(0);
+  handWithDraw.forEach(t=>cnt[t.id]++);
+  return stdWinN([...cnt],needed);
+}
+function getTenpaiOpen(hand,meldsCount){
+  const needed=4-meldsCount;
+  const res=[];
+  for(let id=0;id<34;id++){
+    const cnt=Array(34).fill(0);
+    [...hand,{id,c:99}].forEach(t=>cnt[t.id]++);
+    if(stdWinN([...cnt],needed)) res.push(id);
+  }
+  return res;
 }
 
 // ===== HAND END =====
@@ -817,8 +968,11 @@ function nextHand(){
   G.riichi=[false,false,false,false];
   G.drawnTile=null;
   G.pendingRon=null;
+  G.pendingMeld=null;
+  G.melds=[[],[],[],[]];
   G.turn=0;
   G._furitenTile=undefined;
+  delete G.nextAfterMeld;
   selectedIdx=-1;
 
   dealerFirstDraw();
@@ -880,14 +1034,17 @@ function render(){
   const phase=G.phase;
   const drawnTile=G.drawnTile;
   const fullHand=drawnTile?[...G.hands[0],drawnTile]:[...G.hands[0]];
-  const canTsumo=phase==='player_discard'&&drawnTile&&isWin(fullHand);
-  const waiting=getTenpai(G.hands[0]);
-  const canRiichi=phase==='player_discard'&&!G.riichi[0]&&G.scores[0]>=1000&&waiting.length>0;
+  const meldCount=G.melds[0].length;
+  const canTsumo=phase==='player_discard'&&drawnTile&&(meldCount>0?isWinOpen(fullHand,meldCount):isWin(fullHand));
+  const waiting=meldCount>0?getTenpaiOpen(G.hands[0],meldCount):getTenpai(G.hands[0]);
+  const canRiichi=phase==='player_discard'&&!G.riichi[0]&&G.scores[0]>=1000&&waiting.length>0&&meldCount===0;
 
   setBtn('btnTsumo',canTsumo);
   setBtn('btnRiichi',canRiichi);
   setBtn('btnRon',phase==='ron_offer');
-  setBtn('btnPass',phase==='ron_offer');
+  setBtn('btnPon',phase==='meld_offer'&&!!G.pendingMeld&&G.pendingMeld.ponOk);
+  setBtn('btnChi',phase==='meld_offer'&&!!G.pendingMeld&&G.pendingMeld.chiiOptions&&G.pendingMeld.chiiOptions.length>0);
+  setBtn('btnPass',phase==='ron_offer'||phase==='meld_offer');
 
   // Status
   if(phase==='player_discard'&&G.currentPlayer===0){
@@ -899,6 +1056,13 @@ function render(){
   } else if(phase==='ron_offer'&&G.pendingRon){
     const from=G.pendingRon.from;
     showStatus(`${PNAMES[from]}が「${TNAME[G.pendingRon.tile.id]}」を捨てました。ロンできます！`);
+  } else if(phase==='meld_offer'&&G.pendingMeld){
+    const from=G.pendingMeld.from;
+    const tname=TNAME[G.pendingMeld.tile.id];
+    const acts=[];
+    if(G.pendingMeld.ponOk) acts.push('ポン');
+    if(G.pendingMeld.chiiOptions&&G.pendingMeld.chiiOptions.length>0) acts.push('チー');
+    showStatus(`${PNAMES[from]}が「${tname}」を捨てました。${acts.join('・')}できます！`);
   } else if(phase==='cpu_turn'){
     showStatus(`${PNAMES[G.currentPlayer]}の番...`);
   }
@@ -930,11 +1094,27 @@ function renderDiscards(pIdx){
   });
 }
 
+function renderMelds(){
+  const el=document.getElementById('melds0');
+  if(!el||!G.melds||!G.melds[0].length){if(el)el.innerHTML='';return;}
+  el.innerHTML='';
+  for(const meld of G.melds[0]){
+    const grp=document.createElement('div');
+    grp.className='meld-group';
+    const ids=meld.type==='pon'
+      ?[meld.tileId,meld.tileId,meld.tileId]
+      :meld.tileIds;
+    ids.forEach(id=>grp.appendChild(makeTileEl({id,c:0},true,false)));
+    el.appendChild(grp);
+  }
+}
+
 function renderPlayerHand(){
   const el=document.getElementById('hand0');
   el.innerHTML='';
   const phase=G.phase;
   const inRiichi=G.riichi[0];
+  renderMelds();
 
   G.hands[0].forEach((t,i)=>{
     const d=makeTileEl(t,false,false,false);
