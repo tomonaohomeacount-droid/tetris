@@ -8,8 +8,8 @@
 *{box-sizing:border-box;margin:0;padding:0;}
 :root{
   --bg:#0d1f0d;--felt:#14381a;--gold:#f0c040;
-  --tw:26px;--th:38px;
-  --stw:18px;--sth:26px;
+  --tw:38px;--th:54px;
+  --stw:24px;--sth:34px;
 }
 body{
   background:var(--bg);color:#fff;
@@ -94,12 +94,11 @@ body{
 .tile{
   width:var(--tw);height:var(--th);
   background:#f4eedc;border-radius:3px;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  font-weight:700;color:#1a1a1a;
+  display:flex;align-items:center;justify-content:center;
   border:1px solid #bbb;
   box-shadow:0 2px 3px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.7);
   cursor:pointer;transition:transform .1s,box-shadow .1s;
-  flex-shrink:0;font-size:13px;line-height:1.1;
+  flex-shrink:0;overflow:hidden;padding:1px;
   position:relative;
 }
 .tile:hover{transform:translateY(-4px);}
@@ -110,20 +109,13 @@ body{
 .tile.drawn-tile{
   box-shadow:0 2px 3px rgba(0,0,0,.5),0 0 0 2px #40c0ff,inset 0 1px 0 rgba(255,255,255,.7);
 }
-.tile.man .num{color:#c0392b;}
-.tile.pin .num{color:#1a6cb5;}
-.tile.sou .num{color:#1a8a1a;}
-.tile.honor .num{font-size:14px;}
-.tile .num{font-size:16px;}
-.tile .suit{font-size:9px;opacity:.8;}
+.tile svg{display:block;width:100%;height:100%;}
 
 /* Small tiles (opponent backs + discards) */
 .tile.sm{
   width:var(--stw);height:var(--sth);
-  font-size:9px;
+  padding:1px;
 }
-.tile.sm .num{font-size:11px;}
-.tile.sm .suit{font-size:7px;}
 
 .tile.back{
   background:linear-gradient(135deg,#203880 25%,#142868 25%,#142868 50%,#203880 50%,#203880 75%,#142868 75%);
@@ -213,9 +205,7 @@ body{
 .delta.plus{color:#4ec;}.delta.minus{color:#f66;}
 
 @media(max-width:360px){
-  :root{--tw:23px;--th:34px;--stw:16px;--sth:23px;}
-  .tile .num{font-size:13px;}
-  .tile.sm .num{font-size:10px;}
+  :root{--tw:32px;--th:46px;--stw:20px;--sth:28px;}
 }
 </style>
 </head>
@@ -964,24 +954,103 @@ function renderPlayerHand(){
   }
 }
 
+// ===== TILE SVG GRAPHICS =====
+const MAN_NUM=['一','二','三','四','五','六','七','八','九'];
+
+// 筒子: circle positions [cx,cy] in 38×54 viewBox
+const PIN_POS=[
+  [[19,27]],
+  [[19,15],[19,39]],
+  [[19,10],[19,27],[19,44]],
+  [[10,15],[28,15],[10,39],[28,39]],
+  [[10,10],[28,10],[19,27],[10,44],[28,44]],
+  [[10,10],[28,10],[10,27],[28,27],[10,44],[28,44]],
+  [[10,8],[28,8],[10,21],[28,21],[19,31],[10,45],[28,45]],
+  [[10,7],[28,7],[10,20],[28,20],[10,34],[28,34],[10,47],[28,47]],
+  [[8,8],[19,8],[30,8],[8,27],[19,27],[30,27],[8,46],[19,46],[30,46]],
+];
+
+// 索子: bamboo stalk positions [x,y,height] in 38×54 viewBox, width=8
+const SOU_STALKS=[
+  null, // 1索: special bird
+  [[9,4,46],[21,4,46]],
+  [[3,4,46],[15,4,46],[27,4,46]],
+  [[9,4,23],[21,4,23],[9,30,23],[21,30,23]],
+  [[3,4,23],[15,4,23],[27,4,23],[9,30,23],[21,30,23]],
+  [[3,4,23],[15,4,23],[27,4,23],[3,30,23],[15,30,23],[27,30,23]],
+  [[3,2,15],[15,2,15],[27,2,15],[9,21,15],[21,21,15],[9,38,15],[21,38,15]],
+  [[3,2,15],[15,2,15],[27,2,15],[3,21,15],[15,21,15],[27,21,15],[9,38,15],[21,38,15]],
+  [[3,2,15],[15,2,15],[27,2,15],[3,21,15],[15,21,15],[27,21,15],[3,38,15],[15,38,15],[27,38,15]],
+];
+
+function makeTileSVG(id){
+  const S='<svg viewBox="0 0 38 54" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">';
+  const E='</svg>';
+  if(id<9){
+    // 万子: 漢数字+万
+    return S+
+      `<text x="19" y="29" text-anchor="middle" dominant-baseline="middle" font-size="26" font-weight="900" fill="#c0392b" font-family="serif">${MAN_NUM[id]}</text>`+
+      `<text x="19" y="48" text-anchor="middle" dominant-baseline="middle" font-size="12" font-weight="700" fill="#333" font-family="serif">万</text>`+
+    E;
+  }
+  if(id<18){
+    // 筒子: 円配置
+    const n=id-9;
+    if(n===0){
+      return S+
+        `<circle cx="19" cy="27" r="14" fill="none" stroke="#1a4090" stroke-width="2.5"/>`+
+        `<circle cx="19" cy="27" r="9" fill="none" stroke="#c0392b" stroke-width="2"/>`+
+        `<circle cx="19" cy="27" r="4.5" fill="#c0392b"/>`+
+      E;
+    }
+    const circles=PIN_POS[n].map(([cx,cy])=>
+      `<circle cx="${cx}" cy="${cy}" r="4" fill="none" stroke="#1a4090" stroke-width="1.5"/>`+
+      `<circle cx="${cx}" cy="${cy}" r="2.2" fill="#1a6cb5"/>`
+    ).join('');
+    return S+circles+E;
+  }
+  if(id<27){
+    // 索子: 竹
+    const n=id-18;
+    if(n===0){
+      // 1索: 雀（鳥）
+      return S+
+        `<rect x="16" y="30" width="6" height="22" rx="3" fill="#2a9a2a"/>`+
+        `<rect x="14" y="39" width="10" height="2" fill="#1a5a1a"/>`+
+        `<rect x="14" y="47" width="10" height="2" fill="#1a5a1a"/>`+
+        `<ellipse cx="19" cy="19" rx="10" ry="8" fill="#2a8a2a"/>`+
+        `<circle cx="26" cy="12" r="7" fill="#1a6a1a"/>`+
+        `<polygon points="33,11 39,13 33,15" fill="#e8a000"/>`+
+        `<circle cx="27" cy="10" r="2.2" fill="#fff"/>`+
+        `<circle cx="27.5" cy="10" r="1.1" fill="#111"/>`+
+        `<ellipse cx="16" cy="23" rx="7" ry="5" fill="#1a7a1a" transform="rotate(-15,16,23)"/>`+
+      E;
+    }
+    const stalks=SOU_STALKS[n].map(([x,y,h])=>
+      `<rect x="${x}" y="${y}" width="8" height="${h}" rx="3" fill="#2a9a2a"/>`+
+      `<rect x="${x}" y="${y+Math.floor(h/2)-1}" width="8" height="2" fill="#1a5a1a"/>`
+    ).join('');
+    return S+stalks+E;
+  }
+  // 字牌
+  const HN=['東','南','西','北','白','発','中'];
+  const HC=['#1a1a1a','#1a1a1a','#1a1a1a','#1a1a1a','#888','#1a8a1a','#c0392b'];
+  const n=id-27;
+  if(n===4){
+    // 白: 空白の長方形
+    return S+`<rect x="5" y="6" width="28" height="42" rx="2" fill="none" stroke="#aaa" stroke-width="2.5"/>` +E;
+  }
+  return S+
+    `<text x="19" y="29" text-anchor="middle" dominant-baseline="middle" font-size="24" font-weight="900" fill="${HC[n]}" font-family="serif">${HN[n]}</text>`+
+  E;
+}
+
 function makeTileEl(t,isSmall,isLast,isDrawn){
   const d=document.createElement('div');
   d.className='tile'+(isSmall?' sm':'')+(isDrawn?' drawn-tile':'')+(isLast?' last-disc':'');
   d.className+=' '+TSUIT[t.id];
   if(isSmall&&!isDrawn) d.className+=' disc';
-
-  const num=document.createElement('div');
-  num.className='num';
-  const suit=document.createElement('div');
-  suit.className='suit';
-
-  if(t.id<9){ num.textContent=t.id+1; suit.textContent='万'; }
-  else if(t.id<18){ num.textContent=t.id-8; suit.textContent='筒'; }
-  else if(t.id<27){ num.textContent=t.id-17; suit.textContent='索'; }
-  else{ num.textContent=TNAME[t.id]; }
-
-  d.appendChild(num);
-  if(t.id<27) d.appendChild(suit);
+  d.innerHTML=makeTileSVG(t.id);
   return d;
 }
 
